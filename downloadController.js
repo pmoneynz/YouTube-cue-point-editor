@@ -49,57 +49,53 @@ function executeCommand(command, args, options = {}) {
     });
     
     process.on('error', (error) => {
-      reject(new Error(`Failed to start process: ${error.message}`));
+      reject(new Error(`Failed to start command: ${error.message}`));
     });
   });
 }
 
 /**
- * Gets video metadata using ffprobe
- * @param {string} filePath - Path to the video file
- * @returns {Promise<Object>} - Video metadata including duration
- */
-async function getVideoMetadata(filePath) {
-  try {
-    const output = await executeCommand('ffprobe', [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_format',
-      '-show_streams',
-      filePath
-    ]);
-    
-    const metadata = JSON.parse(output);
-    const duration = parseFloat(metadata.format.duration);
-    
-    return {
-      duration,
-      format: metadata.format,
-      streams: metadata.streams
-    };
-  } catch (error) {
-    throw new Error(`Failed to get video metadata: ${error.message}`);
-  }
-}
-
-/**
- * Generates a unique filename with timestamp to prevent overwrites
- * @param {string} title - Video title
- * @returns {string} - Slug-safe filename
+ * Generates a unique filename based on title and timestamp
+ * @param {string} title - The video title
+ * @returns {string} - Unique filename
  */
 function generateUniqueFilename(title) {
-  const timestamp = Date.now();
-  const slugTitle = slugify(title, {
+  const slug = slugify(title, {
     lower: true,
     strict: true,
     remove: /[*+~.()'"!:@]/g
   });
   
-  return `${slugTitle}-${timestamp}`;
+  // Limit length and add timestamp for uniqueness
+  const truncatedSlug = slug.substring(0, 50);
+  const timestamp = Date.now();
+  
+  return `${truncatedSlug}-${timestamp}`;
 }
 
 /**
- * Gets YouTube video title using yt-dlp
+ * Gets video duration using ffprobe
+ * @param {string} filePath - Path to video file
+ * @returns {Promise<number>} - Duration in seconds
+ */
+async function getVideoDuration(filePath) {
+  try {
+    const output = await executeCommand('ffprobe', [
+      '-v', 'quiet',
+      '-show_entries', 'format=duration',
+      '-of', 'csv=p=0',
+      filePath
+    ]);
+    
+    return parseFloat(output.trim());
+  } catch (error) {
+    console.warn('Could not get video duration:', error.message);
+    return 0;
+  }
+}
+
+/**
+ * Gets YouTube video title using yt-dlp with bot evasion
  * @param {string} url - YouTube URL
  * @returns {Promise<string>} - Video title
  */
@@ -107,6 +103,10 @@ async function getVideoTitle(url) {
   try {
     const output = await executeCommand('yt-dlp', [
       '--get-title',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--referer', 'https://www.youtube.com/',
+      '--extractor-retries', '3',
+      '--socket-timeout', '30',
       url
     ]);
     
@@ -158,11 +158,18 @@ async function downloadVideo(req, res) {
     const finalVideoPath = path.join(DOWNLOADS_DIR, `${filename}-video.mp4`);
     const audioPath = path.join(DOWNLOADS_DIR, `${filename}-audio.wav`);
     
-    // Step 1: Download video using yt-dlp (prefer H.264 for browser compatibility)
+    // Step 1: Download video using yt-dlp with enhanced bot evasion
     console.log('Downloading video with yt-dlp...');
     await executeCommand('yt-dlp', [
-      '-f', 'bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]',
+      '-f', 'bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
       '--merge-output-format', 'mp4',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--referer', 'https://www.youtube.com/',
+      '--extractor-retries', '5',
+      '--socket-timeout', '30',
+      '--sleep-interval', '1',
+      '--max-sleep-interval', '5',
+      '--no-warnings',
       '-o', tempVideoPath,
       url
     ], { cwd: DOWNLOADS_DIR });
@@ -198,51 +205,64 @@ async function downloadVideo(req, res) {
         '-i', tempVideoPath,
         '-an', // Remove audio
         '-c:v', 'libx264', // Encode to H.264
-        '-preset', 'fast', // Fast encoding preset
-        '-crf', '23', // Good quality/size balance
+        '-preset', 'medium', // Encoding speed vs quality trade-off
+        '-crf', '23', // Quality setting (lower = better quality)
         '-y', // Overwrite output file
         finalVideoPath
       ]);
     }
     
-    // Step 3: Extract audio-only file as WAV
+    // Step 3: Extract audio to WAV format
     console.log('Extracting audio stream...');
     await executeCommand('ffmpeg', [
       '-i', tempVideoPath,
       '-vn', // Remove video
-      '-acodec', 'pcm_s16le', // PCM 16-bit little-endian
-      '-ar', '48000', // Sample rate 48kHz
+      '-acodec', 'pcm_s16le', // 16-bit PCM audio for consistency
+      '-ar', '48000', // 48kHz sample rate for professional audio
+      '-ac', '2', // Stereo
       '-y', // Overwrite output file
       audioPath
     ]);
     
-    // Step 4: Get metadata
-    console.log('Getting video metadata...');
-    const metadata = await getVideoMetadata(tempVideoPath);
+    // Get video duration
+    const duration = await getVideoDuration(finalVideoPath);
     
-    // Step 5: Clean up temporary file
+    // Clean up temporary file
     try {
       await fs.unlink(tempVideoPath);
     } catch (error) {
       console.warn('Could not delete temporary file:', error.message);
     }
     
-    // Step 6: Return success response
+    // Verify files were created successfully
+    try {
+      await fs.access(finalVideoPath);
+      await fs.access(audioPath);
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to create output files',
+        error: error.message
+      });
+    }
+    
+    console.log(`Successfully processed video: ${filename}`);
+    
+    // Return success response
     res.json({
       status: 'success',
       videoFile: `${filename}-video.mp4`,
       audioFile: `${filename}-audio.wav`,
-      duration: metadata.duration,
+      duration: duration,
       filename: filename,
       title: videoTitle,
       downloadPath: DOWNLOADS_DIR
     });
     
-    console.log(`Successfully processed video: ${filename}`);
-    
   } catch (error) {
-    console.error('Download/processing error:', error);
+    console.error('Download error:', error);
     
+    // Send detailed error response
     res.status(500).json({
       status: 'error',
       message: 'Failed to download and process video',
@@ -253,34 +273,57 @@ async function downloadVideo(req, res) {
 }
 
 /**
- * Lists all downloaded files
- * @param {Object} req - Express request object
+ * Lists all downloaded video/audio pairs
+ * @param {Object} req - Express request object  
  * @param {Object} res - Express response object
  */
 async function listDownloads(req, res) {
   try {
+    // Ensure downloads directory exists
+    try {
+      await fs.access(DOWNLOADS_DIR);
+    } catch {
+      await fs.mkdir(DOWNLOADS_DIR, { recursive: true });
+      return res.json({
+        status: 'success',
+        downloads: {},
+        downloadPath: DOWNLOADS_DIR
+      });
+    }
+    
     const files = await fs.readdir(DOWNLOADS_DIR);
     
-    // Group files by base filename
+    // Group files by filename prefix (everything before -video/-audio)
     const downloads = {};
+    
     files.forEach(file => {
-      const match = file.match(/^(.+)-(video|audio)\.(mp4|wav)$/);
-      if (match) {
-        const [, basename, type, ext] = match;
-        if (!downloads[basename]) {
-          downloads[basename] = {};
-        }
-        downloads[basename][type] = file;
+      if (file.endsWith('-video.mp4')) {
+        const prefix = file.replace('-video.mp4', '');
+        if (!downloads[prefix]) downloads[prefix] = {};
+        downloads[prefix].video = file;
+      } else if (file.endsWith('-audio.wav')) {
+        const prefix = file.replace('-audio.wav', '');
+        if (!downloads[prefix]) downloads[prefix] = {};
+        downloads[prefix].audio = file;
+      }
+    });
+    
+    // Only return entries that have both video and audio
+    const completeDownloads = {};
+    Object.keys(downloads).forEach(prefix => {
+      if (downloads[prefix].video && downloads[prefix].audio) {
+        completeDownloads[prefix] = downloads[prefix];
       }
     });
     
     res.json({
       status: 'success',
-      downloads: downloads,
+      downloads: completeDownloads,
       downloadPath: DOWNLOADS_DIR
     });
     
   } catch (error) {
+    console.error('List downloads error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to list downloads',
@@ -291,7 +334,5 @@ async function listDownloads(req, res) {
 
 module.exports = {
   downloadVideo,
-  listDownloads,
-  isValidYouTubeUrl,
-  generateUniqueFilename
-}; 
+  listDownloads
+};

@@ -95,7 +95,7 @@ async function getVideoDuration(filePath) {
 }
 
 /**
- * Gets YouTube video title using yt-dlp with bot evasion
+ * Gets YouTube video title using yt-dlp with aggressive bot evasion
  * @param {string} url - YouTube URL
  * @returns {Promise<string>} - Video title
  */
@@ -104,9 +104,16 @@ async function getVideoTitle(url) {
     const output = await executeCommand('yt-dlp', [
       '--get-title',
       '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      '--add-header', 'Accept-Language:en-us,en;q=0.5',
+      '--add-header', 'Accept-Encoding:gzip,deflate',
+      '--add-header', 'Accept-Charset:ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+      '--add-header', 'Keep-Alive:300',
+      '--add-header', 'Connection:keep-alive',
       '--referer', 'https://www.youtube.com/',
-      '--extractor-retries', '3',
-      '--socket-timeout', '30',
+      '--extractor-retries', '10',
+      '--sleep-interval', '2',
+      '--max-sleep-interval', '10',
       url
     ]);
     
@@ -118,7 +125,7 @@ async function getVideoTitle(url) {
 }
 
 /**
- * Downloads and processes YouTube video
+ * Downloads and processes YouTube video with maximum bot evasion
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
@@ -158,35 +165,74 @@ async function downloadVideo(req, res) {
     const finalVideoPath = path.join(DOWNLOADS_DIR, `${filename}-video.mp4`);
     const audioPath = path.join(DOWNLOADS_DIR, `${filename}-audio.wav`);
     
-    // Step 1: Download video using yt-dlp with enhanced bot evasion
-    console.log('Downloading video with yt-dlp...');
-    await executeCommand('yt-dlp', [
-      '-f', 'bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+    // Step 1: Download video using yt-dlp with MAXIMUM bot evasion
+    console.log('Downloading video with aggressive bot evasion...');
+    
+    const ytDlpArgs = [
+      // Format selection - prefer widely compatible formats
+      '-f', 'best[height<=720][ext=mp4]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
+      
+      // Browser impersonation
       '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '--referer', 'https://www.youtube.com/',
-      '--extractor-retries', '5',
-      '--socket-timeout', '30',
-      '--sleep-interval', '1',
-      '--max-sleep-interval', '5',
+      
+      // Complete browser headers
+      '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', 'Accept-Encoding:gzip, deflate, br',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Connection:keep-alive',
+      '--add-header', 'Upgrade-Insecure-Requests:1',
+      '--add-header', 'Sec-Fetch-Dest:document',
+      '--add-header', 'Sec-Fetch-Mode:navigate',
+      '--add-header', 'Sec-Fetch-Site:none',
+      '--add-header', 'Sec-Fetch-User:?1',
+      '--add-header', 'Cache-Control:max-age=0',
+      
+      // Anti-detection settings
+      '--extractor-retries', '10',
+      '--fragment-retries', '10',
+      '--retry-sleep', 'linear=2:10:2',
+      '--sleep-interval', '3',
+      '--max-sleep-interval', '15',
+      '--socket-timeout', '60',
+      
+      // Network settings
+      '--no-check-certificates',
+      '--prefer-insecure',
       '--no-warnings',
+      '--no-call-home',
+      
+      // Geo bypass attempts
+      '--geo-bypass',
+      '--geo-bypass-country', 'US',
+      
+      // Output
       '-o', tempVideoPath,
       url
-    ], { cwd: DOWNLOADS_DIR });
+    ];
+    
+    await executeCommand('yt-dlp', ytDlpArgs, { cwd: DOWNLOADS_DIR });
     
     // Step 2: Extract video-only file (no audio) and ensure H.264 encoding
     console.log('Extracting video stream...');
     
     // Check if the video is already H.264
-    const probeResult = await executeCommand('ffprobe', [
-      '-v', 'quiet',
-      '-select_streams', 'v:0',
-      '-show_entries', 'stream=codec_name',
-      '-of', 'csv=p=0',
-      tempVideoPath
-    ]);
+    let codecName = 'unknown';
+    try {
+      const probeResult = await executeCommand('ffprobe', [
+        '-v', 'quiet',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name',
+        '-of', 'csv=p=0',
+        tempVideoPath
+      ]);
+      codecName = probeResult.trim();
+    } catch (error) {
+      console.warn('Could not probe video codec, assuming needs re-encoding');
+    }
     
-    const codecName = probeResult.trim();
     console.log(`Source video codec: ${codecName}`);
     
     if (codecName === 'h264') {
@@ -207,6 +253,8 @@ async function downloadVideo(req, res) {
         '-c:v', 'libx264', // Encode to H.264
         '-preset', 'medium', // Encoding speed vs quality trade-off
         '-crf', '23', // Quality setting (lower = better quality)
+        '-maxrate', '2M', // Limit bitrate for web
+        '-bufsize', '4M', // Buffer size
         '-y', // Overwrite output file
         finalVideoPath
       ]);
@@ -262,11 +310,39 @@ async function downloadVideo(req, res) {
   } catch (error) {
     console.error('Download error:', error);
     
+    // Check if it's a bot detection error and provide helpful message
+    const errorMessage = error.message || '';
+    let userMessage = 'Failed to download and process video';
+    let suggestions = [];
+    
+    if (errorMessage.includes('Sign in to confirm') || errorMessage.includes('bot')) {
+      userMessage = 'YouTube blocked the download (bot detection)';
+      suggestions = [
+        'Try a different video (educational content works better)',
+        'Shorter videos (< 5 minutes) have less protection',
+        'Creative Commons or older videos work better'
+      ];
+    } else if (errorMessage.includes('Video unavailable')) {
+      userMessage = 'Video is unavailable or restricted';
+      suggestions = [
+        'Try a publicly available video',
+        'Check if the video exists and is not private',
+        'Some regions may block certain content'
+      ];
+    } else if (errorMessage.includes('format')) {
+      userMessage = 'Video format not supported';
+      suggestions = [
+        'Try a standard YouTube video (not a livestream)',
+        'Some premium content may not be downloadable'
+      ];
+    }
+    
     // Send detailed error response
     res.status(500).json({
       status: 'error',
-      message: 'Failed to download and process video',
+      message: userMessage,
       error: error.message,
+      suggestions: suggestions,
       stderr: error.message
     });
   }

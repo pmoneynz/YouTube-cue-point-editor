@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WaveformPlayer Demo</title>
+    <script src="https://unpkg.com/wavesurfer.js@7.7.4/dist/wavesurfer.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #1a1a1a;
+            color: white;
+        }
+        .demo-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #2d2d2d;
+            border-radius: 8px;
+        }
+        .waveform-container {
+            background: #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #3730a3;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .cue-points {
+            margin: 20px 0;
+        }
+        .cue-point {
+            background: #444;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .cue-point:hover {
+            background: #555;
+        }
+        .cue-point.active {
+            background: #ef4444;
+        }
+        #waveform {
+            width: 100%;
+            height: 128px;
+        }
+        .status {
+            margin: 10px 0;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1>WaveformPlayer Demo</h1>
+        <p>This demo tests the core Wavesurfer.js functionality that will be used in the React component.</p>
+        
+        <div class="controls">
+            <label for="audioFile">Load Audio File: </label>
+            <input type="file" id="audioFile" accept="audio/*" />
+            <button id="playPause" disabled>Play/Pause</button>
+            <button id="loadSample">Load Sample Cues</button>
+            <button id="clearCues">Clear Cues</button>
+        </div>
+        
+        <div class="status" id="status">No audio loaded</div>
+        
+        <div class="waveform-container">
+            <div id="waveform"></div>
+        </div>
+        
+        <div class="cue-points">
+            <h3>Cue Points</h3>
+            <div id="cuePointsList"></div>
+        </div>
+    </div>
+
+    <script>
+        let wavesurfer = null;
+        let isPlaying = false;
+        let cuePoints = [];
+        let activeCue = null;
+
+        // Sample cue points for testing
+        const sampleCuePoints = [
+            { time: 5.0, label: "Intro", key: "1" },
+            { time: 15.5, label: "Verse 1", key: "2" },
+            { time: 45.2, label: "Chorus", key: "3" },
+            { time: 78.8, label: "Verse 2", key: "4" }
+        ];
+
+        // Initialize Wavesurfer
+        function initWavesurfer() {
+            if (wavesurfer) {
+                wavesurfer.destroy();
+            }
+
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: '#4f46e5',
+                progressColor: '#06b6d4',
+                cursorColor: '#ffffff',
+                barWidth: 2,
+                barRadius: 1,
+                responsive: true,
+                height: 128,
+                normalize: true,
+                interact: true
+            });
+
+            // Event listeners
+            wavesurfer.on('ready', () => {
+                document.getElementById('status').textContent = 
+                    `Audio loaded - Duration: ${Math.round(wavesurfer.getDuration())}s`;
+                document.getElementById('playPause').disabled = false;
+                createMarkers();
+            });
+
+            wavesurfer.on('play', () => {
+                isPlaying = true;
+                document.getElementById('playPause').textContent = 'Pause';
+            });
+
+            wavesurfer.on('pause', () => {
+                isPlaying = false;
+                document.getElementById('playPause').textContent = 'Play';
+            });
+
+            wavesurfer.on('audioprocess', () => {
+                updateCurrentTime();
+            });
+
+            wavesurfer.on('seek', () => {
+                updateCurrentTime();
+            });
+
+            wavesurfer.on('error', (error) => {
+                console.error('Wavesurfer error:', error);
+                document.getElementById('status').textContent = 'Error loading audio';
+            });
+        }
+
+        // Update current time display
+        function updateCurrentTime() {
+            const currentTime = wavesurfer.getCurrentTime();
+            const duration = wavesurfer.getDuration();
+            document.getElementById('status').textContent = 
+                `${formatTime(currentTime)} / ${formatTime(duration)}`;
+        }
+
+        // Format time for display
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        // Create cue point markers
+        function createMarkers() {
+            if (!wavesurfer || !wavesurfer.isReady) return;
+
+            // Clear existing markers
+            const existingMarkers = document.querySelectorAll('.cue-marker');
+            existingMarkers.forEach(marker => marker.remove());
+
+            const container = document.getElementById('waveform');
+            const containerWidth = container.offsetWidth;
+            const duration = wavesurfer.getDuration();
+
+            if (!duration) return;
+
+            // Create markers for each cue point
+            cuePoints.forEach((cue, index) => {
+                const position = (cue.time / duration) * containerWidth;
+                const isActive = activeCue && activeCue.time === cue.time;
+
+                // Create marker element
+                const marker = document.createElement('div');
+                marker.className = 'cue-marker';
+                marker.style.position = 'absolute';
+                marker.style.left = `${position}px`;
+                marker.style.top = '0';
+                marker.style.width = '2px';
+                marker.style.height = '128px';
+                marker.style.backgroundColor = isActive ? '#ef4444' : '#f59e0b';
+                marker.style.cursor = 'pointer';
+                marker.style.zIndex = '10';
+
+                // Create label
+                const label = document.createElement('div');
+                label.style.position = 'absolute';
+                label.style.top = '-25px';
+                label.style.left = '50%';
+                label.style.transform = 'translateX(-50%)';
+                label.style.background = isActive ? '#ef4444' : '#f59e0b';
+                label.style.color = 'white';
+                label.style.padding = '2px 6px';
+                label.style.borderRadius = '3px';
+                label.style.fontSize = '10px';
+                label.style.whiteSpace = 'nowrap';
+                label.textContent = `${cue.label} (${cue.key})`;
+
+                marker.appendChild(label);
+
+                // Add click handler
+                marker.addEventListener('click', () => {
+                    seekToCue(cue);
+                    setActiveCue(cue);
+                });
+
+                container.appendChild(marker);
+            });
+        }
+
+        // Seek to cue point
+        function seekToCue(cue) {
+            if (!wavesurfer || !wavesurfer.isReady) return;
+            const progress = cue.time / wavesurfer.getDuration();
+            wavesurfer.seekTo(progress);
+        }
+
+        // Set active cue
+        function setActiveCue(cue) {
+            activeCue = cue;
+            renderCuePointsList();
+            createMarkers(); // Recreate markers to update active state
+        }
+
+        // Render cue points list
+        function renderCuePointsList() {
+            const container = document.getElementById('cuePointsList');
+            container.innerHTML = '';
+
+            cuePoints.forEach((cue, index) => {
+                const element = document.createElement('div');
+                element.className = `cue-point ${activeCue && activeCue.time === cue.time ? 'active' : ''}`;
+                element.innerHTML = `
+                    <strong>${cue.label}</strong> - ${formatTime(cue.time)} (Key: ${cue.key})
+                `;
+                element.addEventListener('click', () => {
+                    seekToCue(cue);
+                    setActiveCue(cue);
+                });
+                container.appendChild(element);
+            });
+        }
+
+        // Event handlers
+        document.getElementById('audioFile').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                initWavesurfer();
+                const url = URL.createObjectURL(file);
+                wavesurfer.load(url);
+            }
+        });
+
+        document.getElementById('playPause').addEventListener('click', () => {
+            if (wavesurfer) {
+                wavesurfer.playPause();
+            }
+        });
+
+        document.getElementById('loadSample').addEventListener('click', () => {
+            cuePoints = [...sampleCuePoints];
+            activeCue = null;
+            renderCuePointsList();
+            createMarkers();
+        });
+
+        document.getElementById('clearCues').addEventListener('click', () => {
+            cuePoints = [];
+            activeCue = null;
+            renderCuePointsList();
+            createMarkers();
+        });
+
+        // Initialize
+        renderCuePointsList();
+    </script>
+</body>
+</html> 

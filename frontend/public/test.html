@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Sync Engine Integration Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #1a1a1a; 
+            color: white; 
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+        }
+        .test-section { 
+            margin: 20px 0; 
+            padding: 20px; 
+            border: 1px solid #333; 
+            border-radius: 8px; 
+            background: #2a2a2a; 
+        }
+        .video-container { 
+            position: relative; 
+            background: black; 
+            border-radius: 8px; 
+            overflow: hidden; 
+        }
+        .sync-status { 
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+            background: rgba(0,0,0,0.8); 
+            padding: 10px; 
+            border-radius: 4px; 
+            font-family: monospace; 
+            font-size: 12px; 
+        }
+        .controls { 
+            margin: 10px 0; 
+            display: flex; 
+            gap: 10px; 
+            align-items: center; 
+        }
+        button { 
+            padding: 8px 16px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            background: #4CAF50; 
+            color: white; 
+        }
+        button:hover { 
+            background: #45a049; 
+        }
+        button:disabled { 
+            background: #666; 
+            cursor: not-allowed; 
+        }
+        .cue-button { 
+            background: #2196F3; 
+        }
+        .cue-button.active { 
+            background: #f44336; 
+        }
+        .rapid-test { 
+            background: #ff9800; 
+        }
+        .status { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 10px; 
+            margin: 10px 0; 
+        }
+        .stat { 
+            background: #333; 
+            padding: 10px; 
+            border-radius: 4px; 
+            text-align: center; 
+        }
+        .stat-value { 
+            font-size: 24px; 
+            font-weight: bold; 
+            font-family: monospace; 
+        }
+        .stat-label { 
+            font-size: 12px; 
+            color: #aaa; 
+        }
+        .log { 
+            background: #1a1a1a; 
+            padding: 10px; 
+            border-radius: 4px; 
+            font-family: monospace; 
+            font-size: 12px; 
+            max-height: 200px; 
+            overflow-y: auto; 
+            margin: 10px 0; 
+        }
+        .in-sync { color: #4CAF50; }
+        .out-of-sync { color: #f44336; }
+        .warning { color: #ff9800; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Video Sync Engine Integration Test</h1>
+        <p>Testing frame-accurate video synchronization with Web Audio API</p>
+
+        <div class="test-section">
+            <h2>📁 File Selection</h2>
+            <div class="controls">
+                <button onclick="loadFiles()">Load Available Files</button>
+                <select id="fileSelect" onchange="selectFile()">
+                    <option value="">Select a file pair...</option>
+                </select>
+                <span id="fileStatus">No files loaded</span>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>🎮 Sync Engine Controls</h2>
+            <div class="controls">
+                <button id="playBtn" onclick="togglePlayback()" disabled>▶️ Play</button>
+                <button onclick="forceSync()" disabled id="forceSyncBtn">🔄 Force Sync</button>
+                <button onclick="runRapidJumpTest()" disabled id="rapidTestBtn" class="rapid-test">🚀 Rapid Jump Test</button>
+                <button onclick="clearLog()">🗑️ Clear Log</button>
+            </div>
+            
+            <div class="controls">
+                <label>Cue Points:</label>
+                <button class="cue-button" onclick="jumpToCue(5.0)" disabled>Intro (5s)</button>
+                <button class="cue-button" onclick="jumpToCue(15.5)" disabled>Verse (15.5s)</button>
+                <button class="cue-button" onclick="jumpToCue(35.2)" disabled>Chorus (35.2s)</button>
+                <button class="cue-button" onclick="jumpToCue(58.8)" disabled>Bridge (58.8s)</button>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>📊 Sync Statistics</h2>
+            <div class="status">
+                <div class="stat">
+                    <div class="stat-value" id="driftValue">0.000s</div>
+                    <div class="stat-label">Current Drift</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="maxDriftValue">0.000s</div>
+                    <div class="stat-label">Max Drift</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="correctionsValue">0</div>
+                    <div class="stat-label">Corrections</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="syncStatusValue">N/A</div>
+                    <div class="stat-label">Sync Status</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>🎬 Video Player</h2>
+            <div class="video-container">
+                <video id="videoElement" width="640" height="360" muted controls style="width: 100%; height: auto;"></video>
+                <div class="sync-status" id="syncOverlay">
+                    <div>Expected: <span id="expectedTime">0.000</span>s</div>
+                    <div>Actual: <span id="actualTime">0.000</span>s</div>
+                    <div>Drift: <span id="driftDisplay">0.000</span>s</div>
+                    <div>Status: <span id="statusDisplay">Not syncing</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>📝 Test Log</h2>
+            <div class="log" id="testLog">
+                <div>System initialized. Ready for testing.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Video Sync Engine Implementation
+        class VideoSyncEngine {
+            constructor(video, audioContext) {
+                this.video = video;
+                this.audioContext = audioContext;
+                this.audioStartTime = null;
+                this.cueOffset = 0;
+                this.isPlaying = false;
+                this.driftThreshold = 0.05;
+                this.syncLoopId = null;
+                this.stats = { corrections: 0, maxDrift: 0, driftHistory: [] };
+                this.onStatusUpdate = null;
+            }
+
+            calculateExpectedTime() {
+                if (!this.audioContext || this.audioStartTime === null) return 0;
+                const audioElapsed = this.audioContext.currentTime - this.audioStartTime;
+                return this.cueOffset + audioElapsed;
+            }
+
+            calculateDrift() {
+                if (!this.video) return 0;
+                const expectedTime = this.calculateExpectedTime();
+                const actualTime = this.video.currentTime;
+                return actualTime - expectedTime;
+            }
+
+            correctVideoTime() {
+                if (!this.video || !this.audioContext) return false;
+
+                const drift = this.calculateDrift();
+                const absDrift = Math.abs(drift);
+
+                if (absDrift > this.driftThreshold) {
+                    const expectedTime = this.calculateExpectedTime();
+                    const correctedTime = Math.min(expectedTime, this.video.duration || expectedTime);
+
+                    if (correctedTime >= 0 && correctedTime !== this.video.currentTime) {
+                        this.video.currentTime = correctedTime;
+                        this.stats.corrections++;
+                        this.log(`Sync correction: drift=${drift.toFixed(3)}s, corrected to ${correctedTime.toFixed(3)}s`);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            startSync() {
+                if (this.syncLoopId) return;
+                this.log('Starting sync loop');
+                this.syncLoop();
+            }
+
+            stopSync() {
+                if (this.syncLoopId) {
+                    cancelAnimationFrame(this.syncLoopId);
+                    this.syncLoopId = null;
+                    this.log('Sync loop stopped');
+                }
+            }
+
+            syncLoop() {
+                if (!this.isPlaying) {
+                    this.syncLoopId = null;
+                    return;
+                }
+
+                this.correctVideoTime();
+                
+                const drift = this.calculateDrift();
+                const absDrift = Math.abs(drift);
+                
+                // Update statistics
+                this.stats.driftHistory.push(absDrift);
+                if (this.stats.driftHistory.length > 100) {
+                    this.stats.driftHistory.shift();
+                }
+                this.stats.maxDrift = Math.max(this.stats.maxDrift, absDrift);
+
+                // Update UI
+                if (this.onStatusUpdate) {
+                    this.onStatusUpdate({
+                        drift,
+                        expectedTime: this.calculateExpectedTime(),
+                        actualTime: this.video.currentTime,
+                        isInSync: absDrift <= this.driftThreshold,
+                        stats: this.stats
+                    });
+                }
+
+                this.syncLoopId = requestAnimationFrame(() => this.syncLoop());
+            }
+
+            setPlaybackState(isPlaying, audioStartTime = null, cueOffset = 0) {
+                this.isPlaying = isPlaying;
+                if (audioStartTime !== null) {
+                    this.audioStartTime = audioStartTime;
+                }
+                this.cueOffset = cueOffset;
+
+                if (isPlaying) {
+                    this.startSync();
+                } else {
+                    this.stopSync();
+                }
+            }
+
+            log(message) {
+                console.log(`[VideoSync] ${message}`);
+                const logElement = document.getElementById('testLog');
+                if (logElement) {
+                    const time = new Date().toLocaleTimeString();
+                    logElement.innerHTML += `<div>[${time}] ${message}</div>`;
+                    logElement.scrollTop = logElement.scrollHeight;
+                }
+            }
+        }
+
+        // Global variables
+        let syncEngine = null;
+        let audioContext = null;
+        let audioBuffer = null;
+        let audioSource = null;
+        let availableFiles = [];
+        let currentFile = null;
+        let rapidTestInterval = null;
+
+        // Initialize
+        async function init() {
+            const video = document.getElementById('videoElement');
+            
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                syncEngine = new VideoSyncEngine(video, audioContext);
+                syncEngine.onStatusUpdate = updateSyncStatus;
+                syncEngine.log('Video sync engine initialized');
+                
+                await loadFiles();
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                syncEngine?.log(`Initialization error: ${error.message}`);
+            }
+        }
+
+        // Load available files from backend
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/downloads');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    availableFiles = Object.entries(data.downloads).map(([key, files]) => ({
+                        key,
+                        name: key.replace(/-\d+$/, '').replace(/-/g, ' '),
+                        audioFile: files.audio,
+                        videoFile: files.video
+                    }));
+                    
+                    const select = document.getElementById('fileSelect');
+                    select.innerHTML = '<option value="">Select a file pair...</option>';
+                    
+                    availableFiles.forEach((file, index) => {
+                        const option = document.createElement('option');
+                        option.value = index;
+                        option.textContent = file.name;
+                        select.appendChild(option);
+                    });
+                    
+                    document.getElementById('fileStatus').textContent = `${availableFiles.length} file pairs available`;
+                    syncEngine?.log(`Loaded ${availableFiles.length} file pairs`);
+                }
+            } catch (error) {
+                console.error('Failed to load files:', error);
+                document.getElementById('fileStatus').textContent = 'Error loading files';
+            }
+        }
+
+        // Select and load a file pair
+        async function selectFile() {
+            const select = document.getElementById('fileSelect');
+            const fileIndex = parseInt(select.value);
+            
+            if (isNaN(fileIndex)) return;
+            
+            currentFile = availableFiles[fileIndex];
+            const video = document.getElementById('videoElement');
+            
+            try {
+                // Load video
+                video.src = `/downloads/${currentFile.videoFile}`;
+                
+                // Load audio
+                const audioResponse = await fetch(`/downloads/${currentFile.audioFile}`);
+                const audioData = await audioResponse.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(audioData);
+                
+                // Enable controls
+                document.querySelectorAll('button').forEach(btn => {
+                    if (!btn.onclick || btn.onclick.toString().includes('loadFiles') || btn.onclick.toString().includes('clearLog')) return;
+                    btn.disabled = false;
+                });
+                
+                syncEngine?.log(`Loaded: ${currentFile.name}`);
+                document.getElementById('fileStatus').textContent = `Loaded: ${currentFile.name}`;
+                
+            } catch (error) {
+                console.error('Failed to load file pair:', error);
+                syncEngine?.log(`Error loading files: ${error.message}`);
+            }
+        }
+
+        // Toggle playback
+        function togglePlayback() {
+            if (!audioBuffer || !currentFile) return;
+            
+            const playBtn = document.getElementById('playBtn');
+            
+            if (syncEngine.isPlaying) {
+                // Stop playback
+                if (audioSource) {
+                    audioSource.stop();
+                    audioSource = null;
+                }
+                syncEngine.setPlaybackState(false);
+                playBtn.textContent = '▶️ Play';
+                syncEngine.log('Playback stopped');
+            } else {
+                // Start playback
+                startAudioPlayback(0);
+                playBtn.textContent = '⏸️ Pause';
+            }
+        }
+
+        // Start audio playback from specific offset
+        function startAudioPlayback(offset = 0) {
+            if (!audioBuffer || !audioContext) return;
+            
+            // Stop existing playback
+            if (audioSource) {
+                audioSource.stop();
+            }
+            
+            // Resume audio context if suspended
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            try {
+                audioSource = audioContext.createBufferSource();
+                audioSource.buffer = audioBuffer;
+                audioSource.connect(audioContext.destination);
+                
+                const audioStartTime = audioContext.currentTime;
+                audioSource.start(0, offset);
+                
+                syncEngine.setPlaybackState(true, audioStartTime, offset);
+                syncEngine.log(`Audio started at offset ${offset.toFixed(3)}s`);
+                
+                audioSource.onended = () => {
+                    if (audioSource) {
+                        syncEngine.setPlaybackState(false);
+                        document.getElementById('playBtn').textContent = '▶️ Play';
+                        syncEngine.log('Audio playback ended');
+                    }
+                };
+                
+            } catch (error) {
+                console.error('Failed to start audio:', error);
+                syncEngine?.log(`Audio start error: ${error.message}`);
+            }
+        }
+
+        // Jump to cue point
+        function jumpToCue(time) {
+            if (!audioBuffer) return;
+            
+            const wasPlaying = syncEngine.isPlaying;
+            
+            // Highlight active cue button
+            document.querySelectorAll('.cue-button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            if (wasPlaying) {
+                startAudioPlayback(time);
+            } else {
+                // Just seek video if not playing
+                document.getElementById('videoElement').currentTime = time;
+            }
+            
+            syncEngine.log(`Jumped to cue point: ${time}s`);
+        }
+
+        // Force sync correction
+        function forceSync() {
+            if (syncEngine) {
+                const corrected = syncEngine.correctVideoTime();
+                syncEngine.log(corrected ? 'Forced sync correction applied' : 'No correction needed');
+            }
+        }
+
+        // Run rapid jump test
+        function runRapidJumpTest() {
+            if (!audioBuffer) return;
+            
+            const cuePoints = [5.0, 35.2, 15.5, 58.8, 35.2, 5.0];
+            let index = 0;
+            
+            const testBtn = document.getElementById('rapidTestBtn');
+            testBtn.textContent = '⏸️ Stop Test';
+            testBtn.onclick = () => {
+                clearInterval(rapidTestInterval);
+                testBtn.textContent = '🚀 Rapid Jump Test';
+                testBtn.onclick = runRapidJumpTest;
+                syncEngine.log('Rapid jump test stopped');
+            };
+            
+            syncEngine.log('Starting rapid jump test...');
+            
+            rapidTestInterval = setInterval(() => {
+                if (index < cuePoints.length) {
+                    const cueTime = cuePoints[index];
+                    startAudioPlayback(cueTime);
+                    syncEngine.log(`Rapid jump ${index + 1}/${cuePoints.length}: ${cueTime}s`);
+                    index++;
+                } else {
+                    clearInterval(rapidTestInterval);
+                    testBtn.textContent = '🚀 Rapid Jump Test';
+                    testBtn.onclick = runRapidJumpTest;
+                    syncEngine.log('Rapid jump test completed');
+                }
+            }, 2000);
+        }
+
+        // Update sync status display
+        function updateSyncStatus(status) {
+            const { drift, expectedTime, actualTime, isInSync, stats } = status;
+            
+            // Update main stats
+            document.getElementById('driftValue').textContent = `${drift >= 0 ? '+' : ''}${drift.toFixed(3)}s`;
+            document.getElementById('driftValue').className = `stat-value ${isInSync ? 'in-sync' : 'out-of-sync'}`;
+            
+            document.getElementById('maxDriftValue').textContent = `${stats.maxDrift.toFixed(3)}s`;
+            document.getElementById('correctionsValue').textContent = stats.corrections;
+            
+            const statusText = isInSync ? 'IN SYNC' : 'OUT OF SYNC';
+            document.getElementById('syncStatusValue').textContent = statusText;
+            document.getElementById('syncStatusValue').className = `stat-value ${isInSync ? 'in-sync' : 'out-of-sync'}`;
+            
+            // Update overlay
+            document.getElementById('expectedTime').textContent = expectedTime.toFixed(3);
+            document.getElementById('actualTime').textContent = actualTime.toFixed(3);
+            document.getElementById('driftDisplay').textContent = `${drift >= 0 ? '+' : ''}${drift.toFixed(3)}`;
+            document.getElementById('driftDisplay').className = isInSync ? 'in-sync' : 'out-of-sync';
+            document.getElementById('statusDisplay').textContent = statusText;
+            document.getElementById('statusDisplay').className = isInSync ? 'in-sync' : 'out-of-sync';
+        }
+
+        // Clear log
+        function clearLog() {
+            document.getElementById('testLog').innerHTML = '<div>Log cleared.</div>';
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html> 

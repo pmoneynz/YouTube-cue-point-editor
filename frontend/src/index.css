@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom waveform styles */
+.waveform-container {
+  @apply bg-waveform-bg rounded-lg overflow-hidden;
+}
+
+.wavesurfer-container {
+  @apply w-full;
+}
+
+/* Cue point marker styles */
+.cue-marker {
+  @apply absolute top-0 bottom-0 cursor-pointer z-10;
+  background: linear-gradient(to right, transparent, rgba(245, 158, 11, 0.3), transparent);
+  border-left: 2px solid theme('colors.cue-marker');
+}
+
+.cue-marker.active {
+  border-left-color: theme('colors.cue-active');
+  background: linear-gradient(to right, transparent, rgba(239, 68, 68, 0.3), transparent);
+}
+
+.cue-label {
+  @apply absolute -top-6 left-0 text-xs font-medium px-2 py-1 rounded;
+  @apply bg-cue-marker text-white whitespace-nowrap;
+  transform: translateX(-50%);
+}
+
+.cue-label.active {
+  @apply bg-cue-active;
+}
+
+/* Timeline styles */
+.timeline-container {
+  @apply text-xs text-gray-400;
+}
+
+/* Cue Point Editor Styles */
+.cue-point-editor {
+  @apply text-white;
+}
+
+.cue-header {
+  @apply border-b border-gray-700 pb-4 mb-4;
+}
+
+.cue-actions {
+  @apply flex flex-wrap gap-2;
+}
+
+.cue-list {
+  @apply space-y-2 max-h-96 overflow-y-auto;
+}
+
+.cue-item {
+  @apply p-3 border border-gray-600 rounded-lg transition-all duration-200;
+  @apply hover:border-gray-500 hover:shadow-md;
+}
+
+.cue-item:hover {
+  @apply bg-gray-700;
+}
+
+.cue-item.editing {
+  @apply border-blue-400 bg-blue-900 bg-opacity-20;
+}
+
+.cue-item.error {
+  @apply border-red-400 bg-red-900 bg-opacity-20;
+}
+
+.cue-item.dragging {
+  @apply opacity-50 transform scale-95;
+}
+
+.cue-item input {
+  @apply bg-gray-700 border border-gray-600 text-white rounded px-2 py-1;
+  @apply focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400;
+  @apply transition-colors duration-200;
+}
+
+.cue-item input.error {
+  @apply border-red-400 bg-red-900 bg-opacity-20;
+}
+
+.cue-help {
+  @apply bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm;
+}
+
+.cue-help ul {
+  @apply list-none space-y-1;
+}
+
+.cue-help li {
+  @apply flex items-start;
+}
+
+/* Keyboard shortcut display */
+.keyboard-shortcuts {
+  @apply grid gap-2;
+}
+
+.shortcut-item {
+  @apply flex items-center space-x-2 p-2 bg-gray-700 rounded text-sm;
+  @apply transition-colors duration-200 hover:bg-gray-600;
+}
+
+.shortcut-key {
+  @apply bg-gray-600 px-2 py-1 rounded text-xs font-mono min-w-6 text-center;
+  @apply shadow-inner border border-gray-500;
+}
+
+/* Active cue indicator */
+.active-cue-indicator {
+  @apply bg-gradient-to-r from-blue-500 to-purple-500 text-white px-3 py-1 rounded-full text-sm;
+  @apply animate-pulse;
+}
+
+/* Visual feedback for triggered cues */
+@keyframes cue-trigger {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.cue-triggered {
+  animation: cue-trigger 0.3s ease-in-out;
+}
+
+/* Waveform marker enhancements */
+.cue-marker:hover .cue-label {
+  @apply bg-opacity-90 scale-105;
+}
+
+.cue-marker.triggered {
+  animation: cue-trigger 0.3s ease-in-out;
+}
+
+/* Dark theme adjustments */
+.dark .cue-point-editor {
+  @apply text-gray-100;
+} 

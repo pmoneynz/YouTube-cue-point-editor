@@ -26,8 +26,8 @@ RUN cd frontend && npm install
 # Copy source code
 COPY . .
 
-# Build frontend
-RUN npm run build
+# Build frontend (run from frontend directory)
+RUN cd frontend && npm run build
 
 # Create downloads directory
 RUN mkdir -p downloads

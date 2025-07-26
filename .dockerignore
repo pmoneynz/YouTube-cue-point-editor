@@ -1,0 +1,9 @@
+node_modules
+frontend/node_modules
+frontend/dist
+downloads
+*.log
+.git
+.gitignore
+README.md
+.env*
